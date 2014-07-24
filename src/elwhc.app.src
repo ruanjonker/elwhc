@@ -1,0 +1,12 @@
+{application, elwhc,
+ [
+  {description, ""},
+  {vsn, "1.0.0"},
+  {registered, []},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]},
+  {mod, { elwhc_app, []}},
+  {env, []}
+ ]}.
