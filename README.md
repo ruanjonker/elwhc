@@ -1,7 +1,11 @@
 
+=======
+elwhc
+=====
 
-*This is a work in progress...
+Erlang Light-Weight HTTP Client
 
+This is a work in progress...
 
 ```erlang
 
@@ -11,3 +15,5 @@
 elwhc:request('GET', "https://www.google.co.za", <<>>, [], []).
 
 ```
+
+
