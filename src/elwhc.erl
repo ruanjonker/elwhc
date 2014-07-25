@@ -27,7 +27,7 @@ request(Method, Url, Body, Headers, Options) when   is_list(Url) andalso
     case parse_url(Url) of
     {ok, PUrl} ->
         Opts = build_options(Options, #elwhc_opts{}),
-        elwhc_request:request(#elwhc_request{method = Method, purl = PUrl, headers = Headers, options = Opts});
+        elwhc_request:request(#elwhc_request{method = Method, purl = PUrl, body = Body, headers = Headers, options = Opts});
     Error ->
         Error
     end.
@@ -37,7 +37,7 @@ parse_url(Url) ->
 
     case re:run(Url, "^(([^:/?#]+):)?(//([^/?#]*))?(([^?#]*)([?](.*))?)?", [{capture, [2, 4, 5], list}]) of
     {match, ["http", UserInfoHostAndPort, PathQueryFragment]} ->
-        parse_url(https, UserInfoHostAndPort, PathQueryFragment);
+        parse_url(http, UserInfoHostAndPort, PathQueryFragment);
     {match, ["https", UserInfoHostAndPort, PathQueryFragment]} ->
         parse_url(https, UserInfoHostAndPort, PathQueryFragment);
     {match, _} ->
@@ -50,10 +50,10 @@ parse_url(Scheme, UserInfoHostAndPort, PathQueryFrag) ->
     case re:run(UserInfoHostAndPort, "^((.*)[@])?(([[].+[]])|(.+))?([:]([0-9]+))?", [{capture, [2, 3, 7], list}]) of
     {match, [UserInfo, Host, ""]} ->
         Port = default_port(Scheme),
-        {ok, ?parsed_url(Scheme, Host, Port, UserInfo, PathQueryFrag)};
+        {ok, ?parsed_url(Scheme, Host, Port, Host, UserInfo, PathQueryFrag)};
     {match, [UserInfo, Host, SPort]} ->
         Port = list_to_integer(SPort),
-        {ok, ?parsed_url(Scheme, Host, Port, UserInfo, PathQueryFrag)};
+        {ok, ?parsed_url(Scheme, Host, Port, Host ++ ":" ++ SPort, UserInfo, PathQueryFrag)};
     {match, _} ->
         {error, malformed_url}
     end.
