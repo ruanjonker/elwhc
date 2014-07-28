@@ -25,14 +25,15 @@ request(Request) ->
         Caller ! {Ref, Res}
     end,
 
-    {MRef, Pid} = spawn_monitor(F),
+    {Pid, MRef} = spawn_monitor(F),
 
     receive 
     {'DOWN', MRef, process, Pid, Err} ->
-        demonitor(Ref, [flush]),
-        throw (Err);
+        demonitor(MRef, [flush]),
+        %throw (Err);
+        Err;
     {Ref, Result} ->
-        demonitor(Ref, [flush]),
+        demonitor(MRef, [flush]),
         Result
     end.
 
@@ -56,7 +57,7 @@ request(connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs >
             request(connected, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}))
         end;
     Error ->
-        Error
+        {Error, Request}
     end;
 
 request(ssl_connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
@@ -73,7 +74,7 @@ request(ssl_connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (Ttg
     {ok, SslSock} ->
         request(connected, ?update_ttg(Request#elwhc_request{socket = {ssl, SslSock}}));
     Error ->
-        Error
+        {Error, Request}
     end;
 
 request(connected, Request) ->
@@ -105,15 +106,18 @@ request(connected, Request) ->
     Headers = build_headers([
             {"Host",            HostHeader}
         ,   {"Content-Length",  integer_to_list(size(Body))}
-        ,   {"User-Agent",      "elwhc v1.0.0;Hit it hard!"}
+        ,   {"User-Agent",      "ELWHC/1.0"}
+    ]
 
-    ] ++ Request#elwhc_request.headers, []),
+    ++ if (Opts#elwhc_opts.keepalive) -> [{"Connection", "keep-alive"}]; true -> [] end  
+
+    ++ Request#elwhc_request.headers, []),
  
     case SockMod:send(Sock, [ReqLine, Headers, "\r\n", Body]) of
     ok ->
         request(rx_rsp_line, ?update_ttg(Request));
     Error ->
-        Error
+        {Error, Request}
     end;
 
 request(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
@@ -126,7 +130,7 @@ request(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (Ttg
     {ok, RspHttpPacket} ->
         request(rx_headers, ?update_ttg(Request#elwhc_request{rsp_status = RspHttpPacket}));
     Error ->
-        Error
+        {Error, Request}
     end;
 
 request(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
@@ -144,38 +148,100 @@ request(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgM
 
     {ok, http_eoh} ->
         ok = inet_setopts(Request#elwhc_request.socket, [{packet, raw}]),
-        request(rx_body, ?update_ttg(Request));
-        
+
+        request(calculate_content_length, ?update_ttg(Request));
+
     {error, _} = Err ->
-        Err
+        {Err, Request}
     end;
 
-request(rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar} = Request) when (TtgMs > 0) ->
+request(calculate_content_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_headers = RspHeaders} = Request) when (TtgMs > 0) ->
 
+    NewRequest = 
+    case lists:keysearch('Content-Length', 1, RspHeaders) of
+    {value, {_, StringContentLength}} ->
+
+        case re:run(StringContentLength, "^[0-9]+$", [{capture, none}]) of
+        match ->
+            Request#elwhc_request{content_length = list_to_integer(StringContentLength)};
+        nomatch ->
+            Request#elwhc_request{content_length = undefined}
+        end;
+
+    false ->
+        Request#elwhc_request{content_length = undefined}
+    end,
+
+    request(rx_body, NewRequest);
+
+request(rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, content_length = ContentLength} = Request) when (TtgMs > 0) and 
+                                                                                                                            ((ContentLength =:= undefined) orelse 
+                                                                                                                             ((is_integer(ContentLength)) andalso (ContentLength > 0))) ->
     {SockMod, Sock} = Request#elwhc_request.socket,
 
-    %TODO Keep on receiving to either Conent-Length reached, socket_close or Ttg expire/rx_timeout hit ...
-    case SockMod:recv(Sock, 0, TtgMs) of
+    BytesToRx = 
+    case ContentLength of
+    undefined ->
+        0;
+    _ ->
+        ContentLength
+    end,
+
+    case SockMod:recv(Sock, BytesToRx, TtgMs) of
     {ok, RspBody} ->
 
-        request(rx_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>}));
+        NewContentLength = 
+        case ContentLength of
+        undefined ->
+            undefined;
+        _ ->
+            ContentLength - size(RspBody)
+        end,
+
+        request(rx_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, content_length = NewContentLength}));
 
     {error, closed} ->
-
-        ok = SockMod:close(Sock),
-
         {ok, Request};
 
     Error ->
-        Error
+        {Error, Request}
 
     end;
 
+request(rx_body, #elwhc_request{request_ttg_ms = TtgMs, content_length = ContentLength} = Request) when (TtgMs > 0) andalso ((is_integer(ContentLength)) andalso (ContentLength == 0)) ->
 
-request(_, #elwhc_request{request_ttg_ms = TtgMs} = _Request) when (TtgMs =< 0) ->
-        
-    {error, request_timeout}.
+    {SockMod, Sock} = Request#elwhc_request.socket,
 
+    Opts = Request#elwhc_request.options,
+
+    MustClose = 
+    if Opts#elwhc_opts.keepalive  ->
+    
+        case lists:keysearch('Connection', 1, Request#elwhc_request.rsp_headers) of
+        {value, {_, SrvConnectionState}} ->
+            case string:to_lower(SrvConnectionState) of
+            "close" ->
+                true;
+            _ ->
+                false
+            end;
+        false ->
+            false
+        end;
+
+    true ->
+        true
+    end,
+
+    if (MustClose) ->
+        ok = SockMod:close(Sock),
+        {ok, Request#elwhc_request{socket = undefined}};
+    true ->
+        {ok, Request}
+    end;
+
+request(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
+    {{error, request_timeout}, Request}.
 
 
 -spec update_ttg(elwhc_request(), erlang:timestamp()) -> elwhc_request().

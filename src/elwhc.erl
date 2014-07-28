@@ -47,7 +47,7 @@ parse_url(Url) ->
 -spec parse_url(http_scheme(), string(), string()) -> {ok, parsed_url()} | {error, malformed_url}.
 parse_url(Scheme, UserInfoHostAndPort, PathQueryFrag) ->
 
-    case re:run(UserInfoHostAndPort, "^((.*)[@])?(([[].+[]])|(.+))?([:]([0-9]+))?", [{capture, [2, 3, 7], list}]) of
+    case re:run(UserInfoHostAndPort, "^((.*)[@])?(([[].+[]])|([^:]+))?([:]([0-9]+))?", [{capture, [2, 3, 7], list}]) of
     {match, [UserInfo, Host, ""]} ->
         Port = default_port(Scheme),
         {ok, ?parsed_url(Scheme, Host, Port, Host, UserInfo, PathQueryFrag)};
