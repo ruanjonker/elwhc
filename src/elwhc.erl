@@ -2,14 +2,14 @@
 
 -include("elwhc_private.hrl").
 
--export([request/5]).
+-export([request/6]).
 
 -ifdef(TEST).
 -compile([export_all]).
 -endif.
 
--spec request(http_method(), string(), binary(), http_headers(), http_options()) -> {ok, http_status_code(), http_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, term()}. 
-request(Method, Url, Body, Headers, Options) when   is_list(Url) andalso 
+-spec request(http_method(), string(), binary(), http_headers(), http_options(), pid()) -> {ok, http_status_code(), http_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, term()}. 
+request(Method, Url, Body, Headers, Options, Pid) when   is_list(Url) andalso 
 
                                                     is_binary(Body) andalso 
 
@@ -27,7 +27,7 @@ request(Method, Url, Body, Headers, Options) when   is_list(Url) andalso
     case parse_url(Url) of
     {ok, PUrl} ->
         Opts = build_options(Options, #elwhc_opts{}),
-        elwhc_request:request(#elwhc_request{method = Method, purl = PUrl, body = Body, headers = Headers, options = Opts});
+        elwhc_request:request(Pid, #elwhc_request{method = Method, purl = PUrl, body = Body, headers = Headers, options = Opts});
     Error ->
         Error
     end.

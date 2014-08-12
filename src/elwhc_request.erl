@@ -2,7 +2,7 @@
 
 -include("elwhc_private.hrl").
 
--export([request/1]).
+-export([start_link/0,request/2]).
 
 -ifdef(TEST).
 -compile([export_all]).
@@ -10,36 +10,131 @@
 
 -define(update_ttg(X), update_ttg(X, os:timestamp())).
 
--spec request(elwhc_request()) -> {ok,  http_status_code(), http_headers(), binary()} | {error, term()}.
-request(Request) ->
+-spec start_link() -> {ok, pid()}.
+start_link() ->
+    F =  fun () -> request_worker_loop(#elwhc_request{}) end,
+    {ok, spawn_link(F)}.
 
-    Opts = Request#elwhc_request.options,
-
-    RequestTimeoutMs = Opts#elwhc_opts.request_timeout_ms,
+-spec request(pid(), elwhc_request()) -> {ok,  http_status_code(), http_headers(), binary()} | {error, term()}.
+request(Pid, Request) ->
 
     Ref = make_ref(),
     Caller = self(),
 
-    F = fun() ->
-        Res = request(connect, Request#elwhc_request{request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()}),
-        Caller ! {Ref, Res}
-    end,
+    MRef = monitor(process, Pid),
 
-    {Pid, MRef} = spawn_monitor(F),
+    Pid ! {elwhc_request, Caller, Ref, Request},
 
     receive 
     {'DOWN', MRef, process, Pid, Err} ->
         demonitor(MRef, [flush]),
-        %throw (Err);
-        Err;
+        throw (Err);
     {Ref, Result} ->
         demonitor(MRef, [flush]),
         Result
     end.
 
+-spec request_worker_loop(elwhc_request()) -> ok.
+request_worker_loop(PrevRequest) ->
 
--spec request(elwhc_request_state(), elwhc_request()) -> {ok, http_status_code(), http_headers(), binary()} | {error, term()}.
-request(connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+    Opts = PrevRequest#elwhc_request.options,
+
+    KeepAliveMs = Opts#elwhc_opts.keepalive_ms,
+
+    HandledRequest =
+    receive {elwhc_request, Caller, Ref, Request}  ->
+
+        do_work(Caller, Ref, Request, PrevRequest)
+
+    after KeepAliveMs ->
+
+        case PrevRequest#elwhc_request.socket of
+        {SockMod, Socket} ->
+            ok = SockMod:close(Socket);
+        undefined ->
+            ok
+        end,
+        PrevRequest#elwhc_request{socket = undefined}
+    end,
+
+    request_worker_loop(HandledRequest).
+
+-spec do_work(pid(), reference(), elwhc_request(), elwhc_request()) -> elwhc_request().
+do_work(Caller, Ref, Request, PrevRequest) ->
+
+    Opts = Request#elwhc_request.options,
+
+    RequestTimeoutMs = Opts#elwhc_opts.request_timeout_ms,
+
+    ExistingSocket = PrevRequest#elwhc_request.socket,
+
+    PPurl = PrevRequest#elwhc_request.purl,
+    RPurl = Request#elwhc_request.purl,
+
+    MustReconnect = (ExistingSocket == undefined) orelse 
+                    (PPurl#parsed_url.scheme =/= RPurl#parsed_url.scheme) orelse 
+                    (PPurl#parsed_url.host   =/= RPurl#parsed_url.host) orelse
+                    (PPurl#parsed_url.port   =/= RPurl#parsed_url.port),
+
+    Result =
+    if MustReconnect ->
+
+        %Establish a new connection
+        case ExistingSocket of
+        {SockMod, Socket} ->
+            ok = SockMod:close(Socket);
+        undefined ->
+            ok
+        end,
+
+        handle(connect, Request#elwhc_request{request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()});
+
+    true ->
+        %Re-use existing connection ...
+        handle(connected, Request#elwhc_request{socket = ExistingSocket, request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()})
+    end,
+    
+    CallerRsp = 
+    case Result of
+    {ok, HandledRequest} ->
+        {ok, HandledRequest#elwhc_request.rsp_status, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body};
+    {Error, _} ->
+        Error
+    end,
+
+    Caller ! {Ref, CallerRsp},
+
+    {_, HandledRequest0} = Result,    
+
+    do_work_post_processing(HandledRequest0).
+
+do_work_post_processing(Request) ->
+
+    R0 =
+    case Request#elwhc_request.socket of
+    undefined ->
+        Request;
+    {SockMod, Sock} ->
+
+        Opts = Request#elwhc_request.options,
+
+        ClientWantToClose = Opts#elwhc_opts.keepalive =/= true,
+
+        ServerWantToClose = lists:keyfind('Connection', 1, Request#elwhc_request.rsp_headers) == {'Connection', "close"},
+
+        if (ClientWantToClose orelse ServerWantToClose) ->
+            ok = SockMod:close(Sock),
+            Request#elwhc_request{socket = undefined};
+        true ->
+            Request
+        end
+
+    end,
+
+    R0#elwhc_request{rsp_status = undefined, rsp_headers = [], rsp_body = <<>>}.
+
+-spec handle(elwhc_request_state(), elwhc_request()) -> {ok, http_status_code(), http_headers(), binary()} | {error, term()}.
+handle(connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     #parsed_url {scheme = Scheme, host = Host, port = Port} = Request#elwhc_request.purl,
 
@@ -52,15 +147,15 @@ request(connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs >
     {ok, Sock} ->
         ok = inet:setopts(Sock, [binary, {send_timeout, ConnectTimeoutMs}, {send_timeout_close, true}]),
         if (Scheme =:= https) ->
-            request(ssl_connect, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}));
+            handle(ssl_connect, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}));
         true ->
-            request(connected, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}))
+            handle(connected, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}))
         end;
     Error ->
         {Error, Request}
     end;
 
-request(ssl_connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+handle(ssl_connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     {_, Sock} = Request#elwhc_request.socket,
 
@@ -72,12 +167,12 @@ request(ssl_connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (Ttg
 
     case ssl:connect(Sock, SslOptions, ConnectTimeoutMs) of
     {ok, SslSock} ->
-        request(connected, ?update_ttg(Request#elwhc_request{socket = {ssl, SslSock}}));
+        handle(connected, ?update_ttg(Request#elwhc_request{socket = {ssl, SslSock}}));
     Error ->
         {Error, Request}
     end;
 
-request(connected, Request) ->
+handle(connected, Request) ->
 
     {SockMod, Sock} = Request#elwhc_request.socket,
 
@@ -113,14 +208,16 @@ request(connected, Request) ->
 
     ++ Request#elwhc_request.headers, []),
  
-    case SockMod:send(Sock, [ReqLine, Headers, "\r\n", Body]) of
+    SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
+
+    case SockMod:send(Sock, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]) of
     ok ->
-        request(rx_rsp_line, ?update_ttg(Request));
+        handle(rx_rsp_line, ?update_ttg(Request));
     Error ->
         {Error, Request}
     end;
 
-request(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+handle(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     {SockMod, Sock} = Request#elwhc_request.socket,
 
@@ -128,12 +225,12 @@ request(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (Ttg
 
     case SockMod:recv(Sock, 0, TtgMs) of
     {ok, RspHttpPacket} ->
-        request(rx_headers, ?update_ttg(Request#elwhc_request{rsp_status = RspHttpPacket}));
+        handle(rx_headers, ?update_ttg(Request#elwhc_request{rsp_status = RspHttpPacket}));
     Error ->
         {Error, Request}
     end;
 
-request(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+handle(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     {SockMod, Sock} = Request#elwhc_request.socket,
 
@@ -144,103 +241,81 @@ request(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgM
 
         NewRspHeaders = [{HttpField, HttpString} | RspHeaders],
 
-        request(rx_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
+        handle(rx_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
 
     {ok, http_eoh} ->
         ok = inet_setopts(Request#elwhc_request.socket, [{packet, raw}]),
 
-        request(calculate_content_length, ?update_ttg(Request));
+        handle(plan_rx_body, ?update_ttg(Request));
 
     {error, _} = Err ->
         {Err, Request}
     end;
 
-request(calculate_content_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_headers = RspHeaders} = Request) when (TtgMs > 0) ->
+handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttpPacket, rsp_headers = RspHeaders} = Request) when (TtgMs > 0) ->
 
-    NewRequest = 
-    case lists:keysearch('Content-Length', 1, RspHeaders) of
-    {value, {_, StringContentLength}} ->
+    {http_response, _, StatusCode, _} = RspHttpPacket,
 
-        case re:run(StringContentLength, "^[0-9]+$", [{capture, none}]) of
-        match ->
-            Request#elwhc_request{content_length = list_to_integer(StringContentLength)};
-        nomatch ->
-            Request#elwhc_request{content_length = undefined}
+    if ((StatusCode >= 100) andalso (StatusCode < 300)) ->
+
+        case lists:keysearch('Content-Length', 1, RspHeaders) of
+        {value, {_, StringContentLength}} ->
+            handle(rx_body_content_length, Request#elwhc_request{content_length = list_to_integer(StringContentLength)});
+        false ->
+            case lists:keysearch('Transfer-Encoding', 1, RspHeaders) of
+            {value, {_,_}} ->
+                handle(rx_body_chunked, Request#elwhc_request{content_length = undefined});
+            false ->
+                handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
+            end
         end;
 
-    false ->
-        Request#elwhc_request{content_length = undefined}
-    end,
+    true ->
+        handle(rx_body_done, Request#elwhc_request{content_length = 0})
+    end;
 
-    request(rx_body, NewRequest);
+handle(rx_body_content_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, content_length = ContentLength} = Request) when (TtgMs > 0) andalso
+                                                                                                                             ((is_integer(ContentLength)) andalso (ContentLength > 0)) ->
 
-request(rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, content_length = ContentLength} = Request) when (TtgMs > 0) and 
-                                                                                                                            ((ContentLength =:= undefined) orelse 
-                                                                                                                             ((is_integer(ContentLength)) andalso (ContentLength > 0))) ->
     {SockMod, Sock} = Request#elwhc_request.socket,
 
-    BytesToRx = 
-    case ContentLength of
-    undefined ->
-        0;
-    _ ->
-        ContentLength
-    end,
-
-    case SockMod:recv(Sock, BytesToRx, TtgMs) of
+    case SockMod:recv(Sock, ContentLength, TtgMs) of
     {ok, RspBody} ->
 
-        NewContentLength = 
-        case ContentLength of
-        undefined ->
-            undefined;
-        _ ->
-            ContentLength - size(RspBody)
-        end,
+        NewContentLength = ContentLength - size(RspBody),
 
-        request(rx_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, content_length = NewContentLength}));
-
-    {error, closed} ->
-        {ok, Request};
+        handle(rx_body_content_length, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, content_length = NewContentLength}));
 
     Error ->
         {Error, Request}
 
     end;
 
-request(rx_body, #elwhc_request{request_ttg_ms = TtgMs, content_length = ContentLength} = Request) when (TtgMs > 0) andalso ((is_integer(ContentLength)) andalso (ContentLength == 0)) ->
+handle(rx_body_content_length, #elwhc_request{request_ttg_ms = TtgMs, content_length = ContentLength} = Request) when (TtgMs > 0) andalso (ContentLength =:= 0) ->
+    {ok, Request};
+
+handle(rx_body_until_connection_close, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar} = Request) when (TtgMs > 0) ->
 
     {SockMod, Sock} = Request#elwhc_request.socket,
 
-    Opts = Request#elwhc_request.options,
+    case SockMod:recv(Sock, 0, TtgMs) of
+    {ok, RspBody} ->
 
-    MustClose = 
-    if Opts#elwhc_opts.keepalive  ->
-    
-        case lists:keysearch('Connection', 1, Request#elwhc_request.rsp_headers) of
-        {value, {_, SrvConnectionState}} ->
-            case string:to_lower(SrvConnectionState) of
-            "close" ->
-                true;
-            _ ->
-                false
-            end;
-        false ->
-            false
-        end;
+        handle(rx_body_until_connection_close, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>}));
 
-    true ->
-        true
-    end,
-
-    if (MustClose) ->
-        ok = SockMod:close(Sock),
+    {error, closed} ->
         {ok, Request#elwhc_request{socket = undefined}};
-    true ->
-        {ok, Request}
+
+    Error ->
+        {Error, Request}
+
     end;
 
-request(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
+handle(rx_body_chunked, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar} = Request) when (TtgMs > 0) ->
+    {{error, not_implemented}, Request};
+
+
+handle(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
     {{error, request_timeout}, Request}.
 
 
