@@ -87,28 +87,27 @@ do_work(Caller, Ref, Request, PrevRequest) ->
             ok
         end,
 
-        handle(connect, Request#elwhc_request{request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()});
+        handle(connect, Request#elwhc_request{socket = undefined, request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()});
 
     true ->
         %Re-use existing connection ...
         handle(connected, Request#elwhc_request{socket = ExistingSocket, request_ttg_ms = RequestTimeoutMs, request_ttg_t0 = os:timestamp()})
     end,
     
-    CallerRsp = 
+    {ReqStatus, CallerRsp, HandledRequest0} = 
     case Result of
     {ok, HandledRequest} ->
-        {ok, HandledRequest#elwhc_request.rsp_status, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body};
-    {Error, _} ->
-        Error
+        {ok,{ok, HandledRequest#elwhc_request.rsp_status, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body},HandledRequest};
+    {Error, HandledRequest} ->
+        {error, Error, HandledRequest}
     end,
 
     Caller ! {Ref, CallerRsp},
 
-    {_, HandledRequest0} = Result,    
+    do_work_post_processing(ReqStatus, HandledRequest0).
 
-    do_work_post_processing(HandledRequest0).
-
-do_work_post_processing(Request) ->
+-spec do_work_post_processing(ok | error, elwhc_request()) -> elwhc_request().
+do_work_post_processing(ReqStatus, Request) ->
 
     R0 =
     case Request#elwhc_request.socket of
@@ -122,7 +121,7 @@ do_work_post_processing(Request) ->
 
         ServerWantToClose = lists:keyfind('Connection', 1, Request#elwhc_request.rsp_headers) == {'Connection', "close"},
 
-        if (ClientWantToClose orelse ServerWantToClose) ->
+        if (ClientWantToClose orelse ServerWantToClose orelse (ReqStatus =:= error)) ->
             ok = SockMod:close(Sock),
             Request#elwhc_request{socket = undefined};
         true ->
@@ -134,7 +133,7 @@ do_work_post_processing(Request) ->
     R0#elwhc_request{rsp_status = undefined, rsp_headers = [], rsp_body = <<>>}.
 
 -spec handle(elwhc_request_state(), elwhc_request()) -> {ok, http_status_code(), http_headers(), binary()} | {error, term()}.
-handle(connect, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+handle(connect, #elwhc_request{socket = undefined, request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     #parsed_url {scheme = Scheme, host = Host, port = Port} = Request#elwhc_request.purl,
 
@@ -264,7 +263,7 @@ handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttp
         false ->
             case lists:keysearch('Transfer-Encoding', 1, RspHeaders) of
             {value, {_,_}} ->
-                handle(rx_body_chunked, Request#elwhc_request{content_length = undefined});
+                handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined});
             false ->
                 handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
             end
@@ -311,13 +310,74 @@ handle(rx_body_until_connection_close, #elwhc_request{request_ttg_ms = TtgMs, rs
 
     end;
 
-handle(rx_body_chunked, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar} = Request) when (TtgMs > 0) ->
-    {{error, not_implemented}, Request};
+handle(rx_body_chunked_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, chunk_length_bytes = ChunkLengthBytes} = Request) when (TtgMs > 0) ->
+
+    %See 19.4.6 in https://www.ietf.org/rfc/rfc2616.txt
+
+    {SockMod, Sock} = Request#elwhc_request.socket,
+
+    case SockMod:recv(Sock, 0, TtgMs) of
+    {ok, RspBody} ->
+
+        NewChunkLengthBytes =  <<ChunkLengthBytes/binary,RspBody/binary>>,
+
+        case re:run(NewChunkLengthBytes, <<"\r\n">>, [{capture, none}]) of
+        match ->
+
+            [ChunkSize, Body] = re:split(NewChunkLengthBytes, <<"\r\n">>, [{return, binary}, {parts, 2}]),
+
+            if (size(ChunkSize) > 0) ->
+
+                IntChunkSize = list_to_integer(binary_to_list(ChunkSize), 16),
+
+                if (IntChunkSize > 0) ->
+
+                    ChunkRemaining = IntChunkSize - size(Body),
+                
+                    handle(rx_body_chunked_entity_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,Body/binary>>, chunk_bytes_to_go = ChunkRemaining, chunk_length_bytes = <<>>}));
+
+                true ->
+                    {ok, Request}
+                end;
+
+            true ->
+                {ok, Request}
+
+            end;
+
+        nomatch ->
+            handle(rx_body_chunked_length, ?update_ttg(Request#elwhc_request{chunk_length_bytes = NewChunkLengthBytes}))
+        end;
+
+    Error ->
+        {Error, Request}
+    end;
+
+handle(rx_body_chunked_entity_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, chunk_bytes_to_go = BytesToGo} = Request) when (TtgMs > 0) ->
+
+    %See 19.4.6 in https://www.ietf.org/rfc/rfc2616.txt
+
+    {SockMod, Sock} = Request#elwhc_request.socket,
+
+    case SockMod:recv(Sock, BytesToGo, TtgMs) of
+    {ok, RspBody} ->
+
+        NewBytesToGo = BytesToGo - size(RspBody),
+
+        if (NewBytesToGo > 0) ->
+            handle(rx_body_chunked_entity_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, chunk_bytes_to_go = NewBytesToGo}));
+        true ->
+            handle(rx_body_chunked_length, ?update_ttg(Request#elwhc_request{chunk_bytes_to_go = NewBytesToGo}))
+        end;
+
+    Error ->
+        {Error, Request}
+
+    end;
 
 
 handle(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
     {{error, request_timeout}, Request}.
-
 
 -spec update_ttg(elwhc_request(), erlang:timestamp()) -> elwhc_request().
 update_ttg(#elwhc_request{request_ttg_ms = RequestTTGMs, request_ttg_t0 = T0} = Request, T1) ->

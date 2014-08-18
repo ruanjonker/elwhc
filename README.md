@@ -11,9 +11,7 @@ https://www.ietf.org/rfc/rfc2616.txt
 
 ```bash
 
-./rebar compile
-
-erl -pa ebin
+make run
 
 ```
 
@@ -24,7 +22,7 @@ erl -pa ebin
 
 {ok, Pid} = elwhc_request:start_link(),
 
-elwhc:request('GET', "https://www.google.co.za", <<>>, [], [], Pid).
+elwhc:request('GET', "https://www.google.co.za", <<>>, [], [{keepalive, true}], Pid).
 
 ```
 
