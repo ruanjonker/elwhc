@@ -18,11 +18,15 @@ make run
 
 ```erlang
 
-[application:start(A) || A <- [asn1, crypto, public_key,ssl]].
+elwhc:request('GET', "https://www.google.co.za", <<>>, [], [{keepalive, false}]).
 
-{ok, Pid} = elwhc_request:start_link(),
+elwhc_sessions:list().
 
-elwhc:request('GET', "https://www.google.co.za", <<>>, [], [{keepalive, true}], Pid).
+elwhc:request('GET', "https://www.google.co.za", <<>>, [], [{keepalive, true}]).
+
+elwhc_sessions:list().
+
+
 
 ```
 

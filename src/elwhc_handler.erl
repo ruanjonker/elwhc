@@ -2,7 +2,7 @@
 
 -include("elwhc_private.hrl").
 
--export([start_link/0,request/2]).
+-export([start_link/1,request/2]).
 
 -ifdef(TEST).
 -compile([export_all]).
@@ -10,9 +10,9 @@
 
 -define(update_ttg(X), update_ttg(X, os:timestamp())).
 
--spec start_link() -> {ok, pid()}.
-start_link() ->
-    F =  fun () -> request_worker_loop(#elwhc_request{}) end,
+-spec start_link(boolean()) -> {ok, pid()}.
+start_link(Standalone) when is_boolean(Standalone) ->
+    F =  fun () -> request_worker_loop(#elwhc_request{standalone = Standalone}) end,
     {ok, spawn_link(F)}.
 
 -spec request(pid(), elwhc_request()) -> {ok,  http_status_code(), http_headers(), binary()} | {error, term()}.
@@ -54,9 +54,22 @@ request_worker_loop(PrevRequest) ->
         undefined ->
             ok
         end,
+
         PrevRequest#elwhc_request{socket = undefined}
+
     end,
 
+    if (HandledRequest#elwhc_request.standalone) ->
+        %Keep the process alive, we are in standalone mode
+        ok;
+    true ->
+        if (HandledRequest#elwhc_request.socket =:= undefined) ->
+            exit(normal);
+        true ->
+            ok
+        end
+    end,
+ 
     request_worker_loop(HandledRequest).
 
 -spec do_work(pid(), reference(), elwhc_request(), elwhc_request()) -> elwhc_request().

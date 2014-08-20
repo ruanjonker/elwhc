@@ -19,12 +19,15 @@
                         | {request_timeout_ms,  pos_integer()} 
                         | {keepalive_ms,        pos_integer()} 
                         | {keepalive,           boolean()} 
+                        | {max_sessions,        pos_integer()} 
                         | {tcp_connect_options, list(term())} 
                         | {ssl_options,         list(term())}.
 
 -type http_options() :: list(http_option()).
 
 -type http_status_code() :: pos_integer(). %TODO: list actual status codes.
+
+-type elwhc_request_result() :: {ok, http_status_code(), http_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, max_sessions} | {error, term()}.
 
 
 
