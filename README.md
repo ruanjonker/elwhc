@@ -1,12 +1,7 @@
 
 # elwhc [![Build Status](https://secure.travis-ci.org/ruanjonker/elwhc.png)](http://travis-ci.org/ruanjonker/elwhc)
 
-
-=======
-elwhc
-=====
-
-Erlang Light-Weight HTTP Client
+Light-Weight HTTP Client Library for Erlang
 
 This is a work in progress...
 
