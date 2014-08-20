@@ -1,4 +1,7 @@
 
+# elwhc [![Build Status](https://secure.travis-ci.org/ruanjonker/elwhc.png)](http://travis-ci.org/ruanjonker/elwhc)
+
+
 =======
 elwhc
 =====
