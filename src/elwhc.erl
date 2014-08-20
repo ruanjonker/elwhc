@@ -27,7 +27,7 @@ request(Method, Url, Body, Headers, Options, Pid) when   is_list(Url) andalso
     case parse_url(Url) of
     {ok, PUrl} ->
         Opts = build_options(Options, #elwhc_opts{}),
-        elwhc_request:request(Pid, #elwhc_request{method = Method, purl = PUrl, body = Body, headers = Headers, options = Opts});
+        elwhc_handler:request(Pid, #elwhc_request{method = Method, purl = PUrl, body = Body, headers = Headers, options = Opts});
     Error ->
         Error
     end.

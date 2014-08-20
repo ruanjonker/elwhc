@@ -7,6 +7,8 @@
 
 -type http_port() :: pos_integer().
 
+-type http_host_port() :: {http_host(), http_port()}.
+
 -type http_body() :: binary().
 
 -type http_header() :: {string(), string()}.

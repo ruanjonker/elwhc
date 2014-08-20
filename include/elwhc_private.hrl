@@ -1,6 +1,13 @@
 -include("elwhc.hrl").
 
+-define(elwhc_sessions_table, elwhc_sessions_table).
+
+-record(elwhc_session, {key, scheme, host_port, pid, ts = os:timestamp()}).
+-type elwhc_session() :: #elwhc_session{}.
+
 -define(parsed_url(S,H,P,RH,U,PQF), #parsed_url {scheme = S, host = H, port = P, raw_host = RH, user_info = U, path_query_frag = PQF}).
+
+
 
 -record(parsed_url, {scheme, host, port, raw_host, user_info, path_query_frag}).
 -type parsed_url() :: #parsed_url{}.

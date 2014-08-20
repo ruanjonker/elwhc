@@ -1,17 +1,18 @@
-.PHONY: all deps
+.PHONY: all deps clean
 
-all: clean deps bin/elwhc.app
+all: clean deps ebin/elwhc.app
 
 deps:
 	./rebar get-deps
 
 clean:
+	rm -f erl_crash.dump
 	./rebar clean
 
-bin/elwhc.app: rebar.config src/*.erl include/*
+ebin/elwhc.app: rebar.config src/*.erl include/*
 	./rebar compile
 
-run: all
-	erl -pa ebin -sname elhwcdev@$(shell hostname -s)
+run: clean deps ebin/elwhc.app
+	erl -pa ebin -sname elhwcdev@$(shell hostname -s) -s elwhc_app start_dev
 
 #EOF

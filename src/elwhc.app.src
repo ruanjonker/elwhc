@@ -1,11 +1,15 @@
 {application, elwhc,
  [
-  {description, ""},
+  {description, "Light-Weight HTTP Client - See https://www.ietf.org/rfc/rfc2616.txt"},
   {vsn, "1.0.0"},
-  {registered, []},
+  {registered, [elwhc_sessions, elwhc_sessions_table]},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  asn1,
+                  crypto,
+                  public_key,
+                  ssl  
                  ]},
   {mod, { elwhc_app, []}},
   {env, []}

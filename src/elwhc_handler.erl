@@ -1,4 +1,4 @@
--module(elwhc_request).
+-module(elwhc_handler).
 
 -include("elwhc_private.hrl").
 
@@ -270,7 +270,7 @@ handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttp
         end;
 
     true ->
-        handle(rx_body_done, Request#elwhc_request{content_length = 0})
+        {ok, Request#elwhc_request{content_length = 0}}
     end;
 
 handle(rx_body_content_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, content_length = ContentLength} = Request) when (TtgMs > 0) andalso
