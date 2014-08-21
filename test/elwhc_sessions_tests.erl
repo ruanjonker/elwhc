@@ -65,8 +65,22 @@ free_test() ->
 
     elwhc_test_helper:kill(Pid2, kill),
 
+%%%%%%%%%%%%
+    %Free a pid which is not in the session table ...
+    ?assertEqual(ok, elwhc_sessions:free(self())),
+
+
     ok.
 
+other_gen_server_callbacks_test() ->
+
+    ?assertEqual({noreply, state},  elwhc_sessions:handle_call(notsupported, dontcare, state)),   
+    ?assertEqual({noreply, state},  elwhc_sessions:handle_info(notsupported, state)),   
+    ?assertEqual({noreply, state},  elwhc_sessions:handle_cast(notsupported, state)),   
+    ?assertEqual({ok, state},       elwhc_sessions:code_change(dontcare, state, dontcare)),   
+    ?assertEqual(ok,                elwhc_sessions:terminate(dontcare, dontcare)),   
+
+    ok.
 
 teardown_test() ->
 

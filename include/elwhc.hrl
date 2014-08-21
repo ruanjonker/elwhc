@@ -1,4 +1,6 @@
 
+-define(ELWHC_START_DEPS, [asn1, crypto, public_key,ssl]).
+
 -type http_method() :: 'GET' | 'PUT' | 'POST' | 'DELETE' | 'HEAD' | 'OPTIONS'.
 
 -type http_scheme() :: http | https.

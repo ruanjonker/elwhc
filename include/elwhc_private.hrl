@@ -1,5 +1,8 @@
 -include("elwhc.hrl").
 
+-define(uenc(X), elwhc_util:url_encode(X)).
+-define(udec(X), elwhc_util:url_decode(X)).
+
 -define(elwhc_sessions_table, elwhc_sessions_table).
 
 -define(elwhc_session_free, free).

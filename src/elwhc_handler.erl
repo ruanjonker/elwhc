@@ -110,7 +110,8 @@ do_work(Caller, Ref, Request, PrevRequest) ->
     {ReqStatus, CallerRsp, HandledRequest0} = 
     case Result of
     {ok, HandledRequest} ->
-        {ok,{ok, HandledRequest#elwhc_request.rsp_status, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body},HandledRequest};
+        {http_response,_,StatusCode,_} = HandledRequest#elwhc_request.rsp_status,
+        {ok,{ok, StatusCode, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body},HandledRequest};
     {Error, HandledRequest} ->
         {error, Error, HandledRequest}
     end,
@@ -394,7 +395,7 @@ handle(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
 
 -spec update_ttg(elwhc_request(), erlang:timestamp()) -> elwhc_request().
 update_ttg(#elwhc_request{request_ttg_ms = RequestTTGMs, request_ttg_t0 = T0} = Request, T1) ->
-    NewRequestTTGMs =  RequestTTGMs - trunc(timer:now_diff(T1, T0)/1000),
+    NewRequestTTGMs =  RequestTTGMs - (timer:now_diff(T1, T0) div 1000),
     if (NewRequestTTGMs > 0) ->
         Request#elwhc_request{request_ttg_ms = NewRequestTTGMs, request_ttg_t0 = T1};
     true ->
@@ -405,9 +406,10 @@ update_ttg(#elwhc_request{request_ttg_ms = RequestTTGMs, request_ttg_t0 = T0} = 
 inet_setopts({gen_tcp, Sock}, Opts) -> inet:setopts(Sock, Opts);
 inet_setopts({ssl, Sock}, Opts) -> ssl:setopts(Sock, Opts).
 
-build_headers([], Headers) -> Headers;
+-spec build_headers(list({string(), string()}), iolist()) -> iolist().
 build_headers([{H,V} | T], Headers) -> 
-    NewHeaders = [H,":",V,"\r\n" | Headers],
-    build_headers(T, NewHeaders).
+    NewHeaders = [?uenc(H),$:,?uenc(V),$\r,$\n | Headers],
+    build_headers(T, NewHeaders);
+build_headers([], Headers) -> Headers.
 
 %EOF

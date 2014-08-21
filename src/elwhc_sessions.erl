@@ -71,7 +71,6 @@ handle_call({select, Scheme, Host, Port, MaxSessions}, _From, State) ->
         if (MaxSessions > length(Sessions)) ->
             {ok, Pid} = elwhc_handler:start_link(false),
             true = ets:insert(?elwhc_sessions_table, #elwhc_session{key = TableKey, scheme = Scheme, host = Host, port = Port, pid = Pid}),
-            monitor(process, Pid),
             {ok, Pid};
         true ->
             {error, max_sessions}
@@ -99,8 +98,7 @@ handle_call(_, _, State) ->
 handle_cast(_, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', Ref, process, Pid, _}, State) ->
-    demonitor(Ref, [flush]),
+handle_info({'EXIT', Pid, _}, State) ->
     true = ets:match_delete(?elwhc_sessions_table, ?match_by_pid(Pid)),
     {noreply, State};
 
