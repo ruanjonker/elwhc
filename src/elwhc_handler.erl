@@ -133,7 +133,7 @@ do_work_post_processing(ReqStatus, Request) ->
 
         ClientWantToClose = Opts#elwhc_opts.keepalive =/= true,
 
-        ServerWantToClose = lists:keyfind('Connection', 1, Request#elwhc_request.rsp_headers) == {'Connection', "close"},
+        ServerWantToClose = lists:keyfind("Connection", 1, Request#elwhc_request.rsp_headers) == {"Connection", "close"},
 
         if (ClientWantToClose orelse ServerWantToClose orelse (ReqStatus =:= error)) ->
             ok = SockMod:close(Sock),
@@ -211,7 +211,8 @@ handle(connected, Request) ->
 
     ReqLine = [Method," ", AbsPath," ",HttpVer,"\r\n"],
 
-    Headers = build_headers([
+    %TODO: Override default headers with the passed in headers
+    Headers = build_headers(lists:reverse([
             {"Host",            HostHeader}
         ,   {"Content-Length",  integer_to_list(size(Body))}
         ,   {"User-Agent",      "ELWHC/1.0"}
@@ -219,7 +220,7 @@ handle(connected, Request) ->
 
     ++ if (Opts#elwhc_opts.keepalive) -> [{"Connection", "keep-alive"}]; true -> [] end  
 
-    ++ Request#elwhc_request.headers, []),
+    ++ Request#elwhc_request.headers), []),
  
     SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
 
@@ -252,14 +253,16 @@ handle(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs
 
         RspHeaders = Request#elwhc_request.rsp_headers,
 
-        NewRspHeaders = [{HttpField, HttpString} | RspHeaders],
+        NewRspHeaders = [{maybe_atom_to_list(HttpField), HttpString} | RspHeaders],
 
         handle(rx_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
 
     {ok, http_eoh} ->
         ok = inet_setopts(Request#elwhc_request.socket, [{packet, raw}]),
 
-        handle(plan_rx_body, ?update_ttg(Request));
+        NewRspHeaders = lists:reverse(Request#elwhc_request.rsp_headers),
+
+        handle(plan_rx_body, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
 
     {error, _} = Err ->
         {Err, Request}
@@ -271,11 +274,11 @@ handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttp
 
     if ((StatusCode >= 100) andalso (StatusCode < 300)) ->
 
-        case lists:keysearch('Content-Length', 1, RspHeaders) of
+        case lists:keysearch("Content-Length", 1, RspHeaders) of
         {value, {_, StringContentLength}} ->
             handle(rx_body_content_length, Request#elwhc_request{content_length = list_to_integer(StringContentLength)});
         false ->
-            case lists:keysearch('Transfer-Encoding', 1, RspHeaders) of
+            case lists:keysearch("Transfer-Encoding", 1, RspHeaders) of
             {value, {_,_}} ->
                 handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined});
             false ->
@@ -408,8 +411,13 @@ inet_setopts({ssl, Sock}, Opts) -> ssl:setopts(Sock, Opts).
 
 -spec build_headers(list({string(), string()}), iolist()) -> iolist().
 build_headers([{H,V} | T], Headers) -> 
-    NewHeaders = [?uenc(H),$:,?uenc(V),$\r,$\n | Headers],
+    NewHeaders = [H,$:,V,$\r,$\n | Headers],
     build_headers(T, NewHeaders);
 build_headers([], Headers) -> Headers.
+
+-spec maybe_atom_to_list(string() | atom()) -> string().
+maybe_atom_to_list(V) when is_atom(V) -> atom_to_list(V);
+maybe_atom_to_list(V) when is_list(V) -> V.
+
 
 %EOF

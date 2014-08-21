@@ -3,7 +3,7 @@
 -include("elwhc_private.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--define(stop_deps, [application:stop(A) || A <- lists:reverse(?ELWHC_START_DEPS)]).
+-define(stop_deps, elwhc_test_helper:stop_app_deps()).
 
 setup_test() ->
     error_logger:tty(false),
