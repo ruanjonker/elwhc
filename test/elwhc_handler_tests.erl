@@ -15,9 +15,30 @@ setup_test() ->
 
     ok.
 
+merge_headers_test() ->
+
+    E0 = lists:sort([{"Host", "myhost.com"}, {"User-Agent", "ELWHC/1.0"}]),
+    ?assertEqual(E0, lists:sort(elwhc_handler:merge_headers("myhost.com", false, undefined, []))),
+
+    E1 = lists:sort([{"host", "user's host"}, {"User-Agent", "ELWHC/1.0"}]),
+    ?assertEqual(E1, lists:sort(elwhc_handler:merge_headers("myhost.com", false, undefined, [{"host", "user's host"}]))),
+     
+    E2 = lists:sort([{"Connection", "keep-alive"},{"Host", "myhost.com"}, {"User-Agent", "ELWHC/1.0"}]),
+    ?assertEqual(E2, lists:sort(elwhc_handler:merge_headers("myhost.com", true, undefined, []))),
+
+    E3 = lists:sort([{"Connection", "keep-alive"},{"host", "user's host"}, {"User-Agent", "ELWHC/1.0"}]),
+    ?assertEqual(E3, lists:sort(elwhc_handler:merge_headers("myhost.com", true, undefined, [{"host", "user's host"}, {"connection", "close"}]))),
+
+    E4 = lists:sort([{"Connection", "keep-alive"},{"host", "user's host"}, {"User-Agent", "ELWHC/1.0"}, {"Content-Length", "10"}]),
+    ?assertEqual(E4, lists:sort(elwhc_handler:merge_headers("myhost.com", true, 10, [{"host", "user's host"}, {"connection", "close"}, {"Content-Length", "19999"}]))),
+
+    E5 = lists:sort([{"Connection", "keep-alive"},{"host", "user's host"}, {"user-agent", "user's ua"}]),
+    ?assertEqual(E5, lists:sort(elwhc_handler:merge_headers("myhost.com", true, undefined, [{"host", "user's host"}, {"user-agent", "user's ua"}]))),
+
+    ok.
 
 
-basic_server_content_length_close_test() ->
+basic_server_keepalive_test() ->
 
     TestPid = self(),
 
@@ -25,12 +46,55 @@ basic_server_content_length_close_test() ->
 
     rot(listening),
 
-    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.36:12345/pa/th?a=b#12345", <<>>, [], []), TestPid ! Res end),
+
+%%%%%%%%First request
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.36:12345/pa/th?a=b#12345", <<>>, [], [{keepalive, true}]), TestPid ! Res end),
 
     rot(accepted),
 
     rot({payload, 
-        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.36:12345\r\nContent-Length:0\r\nUser-Agent:ELWHC/1.0\r\n\r\n">>}}),
+        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.36:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
+
+    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nContent-Length:5\r\nX-Test:bla\r\n\r\nHello">>},
+
+    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+
+    ServerPid ! loop,
+
+
+%%%%%%%%% Second request
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.36:12345/pa/th?a=b2#12345", <<>>, [], [{keepalive, true}]), TestPid ! Res end),
+
+    rot({payload, 
+        {ok, <<"GET /pa/th?a=b2#12345 HTTP/1.1\r\nHost:127.0.0.36:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
+
+    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nContent-Length:5\r\nX-Test:bla\r\n\r\nHello">>},
+
+    ServerPid ! close,
+
+    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+
+    ServerPid ! die,
+
+    rot({'DOWN', Ref, process, ServerPid, normal}),
+
+    ok.
+
+
+basic_server_content_length_close_test() ->
+
+    TestPid = self(),
+
+    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,0,37}, 12345) end),
+
+    rot(listening),
+
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.37:12345/pa/th?a=b#12345", <<>>, [{"User-Agent", "MyApp"}], []), TestPid ! Res end),
+
+    rot(accepted),
+
+    rot({payload, 
+        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nUser-Agent:MyApp\r\nHost:127.0.0.37:12345\r\nContent-Length:0\r\n\r\n">>}}),
 
     ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nContent-Length:5\r\nX-Test:bla\r\n\r\nHello">>},
 
@@ -48,16 +112,16 @@ basic_server_connection_close_test() ->
 
     TestPid = self(),
 
-    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,0,36}, 12345) end),
+    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,0,38}, 12345) end),
 
     rot(listening),
 
-    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.36:12345/pa/th?a=b#12345", <<>>, [], []), TestPid ! Res end),
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.38:12345/pa/th?a=b#12345", <<>>, [], []), TestPid ! Res end),
 
     rot(accepted),
 
     rot({payload, 
-        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.36:12345\r\nContent-Length:0\r\nUser-Agent:ELWHC/1.0\r\n\r\n">>}}),
+        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.38:12345\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
 
     ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\n\r\nHello">>},
 
@@ -126,6 +190,11 @@ basic_server(TestPid, If, Port) ->
 
     TestPid ! accepted,
 
+    basic_server_rx_loop(TestPid, LS, AS).
+    
+
+basic_server_rx_loop(TestPid, LS, AS) ->
+
     RxRes = gen_tcp:recv(AS, 0),
 
     TestPid ! {payload, RxRes},
@@ -137,11 +206,15 @@ basic_server(TestPid, If, Port) ->
         receive close ->
             ?assertEqual(ok, gen_tcp:close(AS)),
 
-            ?assertEqual(ok, gen_tcp:close(LS))
+            ?assertEqual(ok, gen_tcp:close(LS)),
 
-        end,
+            receive die -> ok end;
 
-        receive die -> ok end
+        loop ->
+
+            basic_server_rx_loop(TestPid, LS, AS)
+
+        end
 
     end.
 
@@ -152,6 +225,8 @@ rot(Expected) ->
 %    ?debugFmt("~nROTGOT: ~p~n", [Expected]),
         ok;
     Other ->
+        ?debugFmt("~nROT E: ~p~n", [Expected]),
+        ?debugFmt("~nROT T: ~p~n", [Other]),
         throw(Other)
     end.
 

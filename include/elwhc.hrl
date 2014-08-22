@@ -22,6 +22,7 @@
                         | {keepalive_ms,        pos_integer()} 
                         | {keepalive,           boolean()} 
                         | {max_sessions,        pos_integer()} 
+                        | {max_requests_per_session,        pos_integer()} 
                         | {tcp_connect_options, list(term())} 
                         | {ssl_options,         list(term())}.
 

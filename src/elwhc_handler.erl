@@ -110,8 +110,16 @@ do_work(Caller, Ref, Request, PrevRequest) ->
     {ReqStatus, CallerRsp, HandledRequest0} = 
     case Result of
     {ok, HandledRequest} ->
-        {http_response,_,StatusCode,_} = HandledRequest#elwhc_request.rsp_status,
-        {ok,{ok, StatusCode, HandledRequest#elwhc_request.rsp_headers, HandledRequest#elwhc_request.rsp_body},HandledRequest};
+
+        {http_response,_,SC,_} = HandledRequest#elwhc_request.rsp_status,
+
+        NewReqCount = PrevRequest#elwhc_request.request_count + 1,
+        
+        RH = HandledRequest#elwhc_request.rsp_headers,
+        RB = HandledRequest#elwhc_request.rsp_body,
+
+        {ok, {ok, SC, RH, RB}, HandledRequest#elwhc_request{request_count = NewReqCount}};
+
     {Error, HandledRequest} ->
         {error, Error, HandledRequest}
     end,
@@ -131,13 +139,15 @@ do_work_post_processing(ReqStatus, Request) ->
 
         Opts = Request#elwhc_request.options,
 
+        MaxRequestsReached = Request#elwhc_request.request_count >= Opts#elwhc_opts.max_requests_per_session,
+
         ClientWantToClose = Opts#elwhc_opts.keepalive =/= true,
 
         ServerWantToClose = lists:keyfind("Connection", 1, Request#elwhc_request.rsp_headers) == {"Connection", "close"},
 
-        if (ClientWantToClose orelse ServerWantToClose orelse (ReqStatus =:= error)) ->
+        if (ClientWantToClose orelse ServerWantToClose orelse MaxRequestsReached orelse (ReqStatus =:= error)) ->
             ok = SockMod:close(Sock),
-            Request#elwhc_request{socket = undefined};
+            Request#elwhc_request{socket = undefined, request_count = 0};
         true ->
             Request
         end
@@ -195,7 +205,7 @@ handle(connected, Request) ->
 
     PUrl = Request#elwhc_request.purl,
 
-    HostHeader = PUrl#parsed_url.raw_host,
+    HostHeaderValue = PUrl#parsed_url.raw_host,
 
     PathQueryFrag = PUrl#parsed_url.path_query_frag,
 
@@ -211,17 +221,15 @@ handle(connected, Request) ->
 
     ReqLine = [Method," ", AbsPath," ",HttpVer,"\r\n"],
 
-    %TODO: Override default headers with the passed in headers
-    Headers = build_headers(lists:reverse([
-            {"Host",            HostHeader}
-        ,   {"Content-Length",  integer_to_list(size(Body))}
-        ,   {"User-Agent",      "ELWHC/1.0"}
-    ]
+    UserHeaders = Request#elwhc_request.headers,
+    KeepAlive = Opts#elwhc_opts.keepalive,
 
-    ++ if (Opts#elwhc_opts.keepalive) -> [{"Connection", "keep-alive"}]; true -> [] end  
+    SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
 
-    ++ Request#elwhc_request.headers), []),
- 
+    ContentLength = if SendBody -> size(Body) ; true -> 0 end,
+
+    Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders), []),
+
     SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
 
     case SockMod:send(Sock, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]) of
@@ -419,5 +427,52 @@ build_headers([], Headers) -> Headers.
 maybe_atom_to_list(V) when is_atom(V) -> atom_to_list(V);
 maybe_atom_to_list(V) when is_list(V) -> V.
 
+-spec merge_headers(string(), boolean(), pos_integer() | undefined, http_headers()) -> http_headers().
+merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders) ->
+
+    %Step 1. Strip any "connection" headers fro mthe UserHeaders
+    H0 = [{HL, H, V} || {H,V} <- UserHeaders, 
+        begin
+            HL = string:to_lower(H),
+            HL =/= "connection" andalso 
+            HL =/= "content-length"
+        end
+    ],
+
+    %Step 2. Check for a "host" UserHeader, if not present, use default
+    H1 =
+    case lists:keyfind("host", 1, H0) of
+    false -> 
+        [{"host", "Host", HostHeaderValue} | H0];
+    _ ->
+        H0
+    end,
+
+    %Step 3. Add the "connection" header if keepalive ...
+    H2 =
+    if KeepAlive ->
+        [{"connection", "Connection", "keep-alive"} | H1];
+    true ->
+        H1
+    end,
+
+    %Step 4. Check for a "user-agent" UserHeader, if not present, use default
+    H3 =
+    case lists:keyfind("user-agent", 1, H2) of
+    false -> 
+        [{"user-agent", "User-Agent", "ELWHC/1.0"} | H2];
+    _ ->
+        H2
+    end,
+
+    %Step 5. Add the "content-length" header if defined ...
+    H4 =
+    if ContentLength =/= undefined ->
+        [{"content-length", "Content-Length", integer_to_list(ContentLength)} | H3];
+    true ->
+        H3
+    end,
+
+    [{H, V} || {_, H,V} <- H4].
 
 %EOF
