@@ -44,7 +44,6 @@
 
     , content_length = undefined
 
-    , chunk_length_bytes = <<>>
     , chunk_bytes_to_go = 0
 }).
 -type elwhc_request() :: #elwhc_request{}.

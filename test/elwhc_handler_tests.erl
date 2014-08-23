@@ -37,6 +37,47 @@ merge_headers_test() ->
 
     ok.
 
+basic_server_transfer_chunked_test() ->
+
+    TestPid = self(),
+
+    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,0,35}, 12345) end),
+
+    rot(listening),
+
+%%%%%%%%First request
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.35:12345/pa/th?a=b#12345", <<>>, [], [{keepalive, true}]), TestPid ! Res end),
+
+    rot(accepted),
+
+    rot({payload, 
+        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.35:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
+
+    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nTransfer-Encoding:chunked\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
+
+    rot({ok, 200, [{"More-Headers","Header-Value"}, {"Server", "bla"}, {"Transfer-Encoding", "chunked"}], <<"1234567">>}),
+
+    ServerPid ! loop,
+
+%%%%%%%%% Second request
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.35:12345/pa/th?a=b2#12345", <<>>, [], [{keepalive, true}]), TestPid ! Res end),
+
+    rot({payload, 
+        {ok, <<"GET /pa/th?a=b2#12345 HTTP/1.1\r\nHost:127.0.0.35:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
+
+    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nContent-Length:5\r\nX-Test:bla\r\n\r\nHello">>},
+
+    ServerPid ! close,
+
+    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+
+    ServerPid ! die,
+
+    rot({'DOWN', Ref, process, ServerPid, normal}),
+
+    ok.
+
+
 
 basic_server_keepalive_test() ->
 

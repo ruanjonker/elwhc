@@ -335,43 +335,25 @@ handle(rx_body_until_connection_close, #elwhc_request{request_ttg_ms = TtgMs, rs
 
     end;
 
-handle(rx_body_chunked_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, chunk_length_bytes = ChunkLengthBytes} = Request) when (TtgMs > 0) ->
+handle(rx_body_chunked_length, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
     %See 19.4.6 in https://www.ietf.org/rfc/rfc2616.txt
 
-    {SockMod, Sock} = Request#elwhc_request.socket,
+    {SockMod, Sock} = RSock = Request#elwhc_request.socket,
+
+    ok = inet_setopts(RSock, [{packet, line}]),
 
     case SockMod:recv(Sock, 0, TtgMs) of
     {ok, RspBody} ->
 
-        NewChunkLengthBytes =  <<ChunkLengthBytes/binary,RspBody/binary>>,
+        {match, [ChunkSize]} = re:run(RspBody, <<"^([0-9a-fA-F]+)">>, [{capture, [1], binary}]),
 
-        case re:run(NewChunkLengthBytes, <<"\r\n">>, [{capture, none}]) of
-        match ->
+        IntChunkSize = list_to_integer(binary_to_list(ChunkSize), 16),
 
-            [ChunkSize, Body] = re:split(NewChunkLengthBytes, <<"\r\n">>, [{return, binary}, {parts, 2}]),
-
-            if (size(ChunkSize) > 0) ->
-
-                IntChunkSize = list_to_integer(binary_to_list(ChunkSize), 16),
-
-                if (IntChunkSize > 0) ->
-
-                    ChunkRemaining = IntChunkSize - size(Body),
-                
-                    handle(rx_body_chunked_entity_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,Body/binary>>, chunk_bytes_to_go = ChunkRemaining, chunk_length_bytes = <<>>}));
-
-                true ->
-                    {ok, Request}
-                end;
-
-            true ->
-                {ok, Request}
-
-            end;
-
-        nomatch ->
-            handle(rx_body_chunked_length, ?update_ttg(Request#elwhc_request{chunk_length_bytes = NewChunkLengthBytes}))
+        if (IntChunkSize > 0) ->
+            handle(rx_body_chunked_entity_body, ?update_ttg(Request#elwhc_request{chunk_bytes_to_go = IntChunkSize}));
+        true ->
+            handle(rx_body_chunked_entity_headers, ?update_ttg(Request#elwhc_request{chunk_bytes_to_go = 0}))
         end;
 
     Error ->
@@ -382,7 +364,9 @@ handle(rx_body_chunked_entity_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_b
 
     %See 19.4.6 in https://www.ietf.org/rfc/rfc2616.txt
 
-    {SockMod, Sock} = Request#elwhc_request.socket,
+    {SockMod, Sock} = RSock = Request#elwhc_request.socket,
+
+    ok = inet_setopts(RSock, [{packet, 0}]),
 
     case SockMod:recv(Sock, BytesToGo, TtgMs) of
     {ok, RspBody} ->
@@ -392,14 +376,37 @@ handle(rx_body_chunked_entity_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_b
         if (NewBytesToGo > 0) ->
             handle(rx_body_chunked_entity_body, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, chunk_bytes_to_go = NewBytesToGo}));
         true ->
-            handle(rx_body_chunked_length, ?update_ttg(Request#elwhc_request{chunk_bytes_to_go = NewBytesToGo}))
+            {ok, _} = SockMod:recv(Sock, 2, TtgMs), %Read the trailing \r\n after the chunkdata
+            handle(rx_body_chunked_length, ?update_ttg(Request#elwhc_request{rsp_body = <<RspBodySoFar/binary,RspBody/binary>>, chunk_bytes_to_go = 0}))
         end;
 
     Error ->
         {Error, Request}
-
     end;
 
+handle(rx_body_chunked_entity_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+
+    %See 19.4.6 in https://www.ietf.org/rfc/rfc2616.txt
+
+    {SockMod, Sock} = RSock = Request#elwhc_request.socket,
+
+    ok = inet_setopts(RSock, [{packet, httph}]),
+
+    case SockMod:recv(Sock, 0, TtgMs) of
+    {ok, {http_header, _, HttpField, _, HttpString}} ->
+
+        RspHeaders = Request#elwhc_request.rsp_headers,
+        NewRspHeaders = [{maybe_atom_to_list(HttpField), HttpString} | RspHeaders],
+
+        handle(rx_body_chunked_entity_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
+
+    {ok, http_eoh} ->
+        {ok, Request};
+
+    {error, _} = Err ->
+        {Err, Request}
+
+    end;
 
 handle(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
     {{error, request_timeout}, Request}.
