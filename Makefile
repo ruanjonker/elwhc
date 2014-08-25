@@ -18,4 +18,8 @@ test: ebin/elwhc.app test/*
 run: clean deps ebin/elwhc.app
 	erl -pa ebin -sname elhwcdev@$(shell hostname -s) -s elwhc_app start_dev
 
+analyze: ebin/elwhc.app
+	dialyzer ebin/ --fullpath --verbose -Wno_unused
+
+
 #EOF

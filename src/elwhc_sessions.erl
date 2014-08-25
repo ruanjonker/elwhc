@@ -29,7 +29,7 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
--spec select(http_scheme(), http_host(), http_port(), pos_integer()) -> ok. 
+-spec select(http_scheme(), http_host(), http_port(), pos_integer()) -> {ok, pid()} | {error, max_sessions}.
 select(Scheme, Host, Port, MaxSessions) when ?scheme_guard(Scheme) andalso ?max_sessions_guard(MaxSessions) ->
     gen_server:call(?MODULE, {select, Scheme, Host, Port, MaxSessions}, infinity).
 
@@ -37,7 +37,7 @@ select(Scheme, Host, Port, MaxSessions) when ?scheme_guard(Scheme) andalso ?max_
 free(Pid) ->
     gen_server:call(?MODULE, {free, Pid}, infinity).
 
--spec list() -> list(elwhc_session()).
+-spec list() -> list(list(elwhc_session())).
 list() ->
     ets:match(?elwhc_sessions_table, '$1').
 

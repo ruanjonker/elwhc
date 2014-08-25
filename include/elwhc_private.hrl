@@ -52,4 +52,6 @@
 
 -type elwhc_handler_pid() :: pid() | undefined.
 
+-type binary_or_string() :: string() | binary().
+
 %EOF
