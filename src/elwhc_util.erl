@@ -1,5 +1,7 @@
 -module(elwhc_util).
 
+-include("elwhc_private.hrl").
+
 -export([
         url_encode/1,
         url_decode/1
@@ -38,7 +40,7 @@ url_encode([]) ->
     [].
 
 
--spec url_decode(pt_types:binary_or_string()) -> string().
+-spec url_decode(binary_or_string()) -> string().
 url_decode(Binary)
 when is_binary(Binary) ->
     url_decode(binary_to_list(Binary));
