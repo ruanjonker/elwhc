@@ -176,6 +176,30 @@ basic_server_connection_close_test() ->
 
     ok.
 
+receive_timeout_test() ->
+
+    TestPid = self(),
+
+    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,0,38}, 12345) end),
+
+    rot(listening),
+
+    spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.38:12345/pa/th?a=b#12345", <<>>, [], [{request_timeout_ms, 100}]), TestPid ! Res end),
+
+    rot(accepted),
+
+    rot({payload, 
+        {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.38:12345\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
+
+    timer:sleep(200),
+
+    rot({error, timeout}),
+ 
+    exit(ServerPid, kill),   
+
+    rot({'DOWN', Ref, process, ServerPid, killed}),
+
+    ok.
 
 update_ttg_test() ->
 
