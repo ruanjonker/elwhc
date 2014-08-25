@@ -27,6 +27,7 @@ build_options_test() ->
         , {tcp_connect_options, [tcp]}
         , {ssl_options, [ssl]}
         , {max_sessions,4}
+        , {max_requests_per_session,5}
     ],
 
     Expected = #elwhc_opts {
@@ -37,6 +38,7 @@ build_options_test() ->
         , tcp_connect_options = [tcp]
         , ssl_options = [ssl]
         , max_sessions = 4
+        , max_requests_per_session = 5
     },
 
     ?assertEqual(Expected, elwhc:build_options(Opts, #elwhc_opts{})),

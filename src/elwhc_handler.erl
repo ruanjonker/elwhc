@@ -168,12 +168,14 @@ handle(connect, #elwhc_request{socket = undefined, request_ttg_ms = TtgMs} = Req
 
     case gen_tcp:connect(Host, Port, TcpConnectOptions, ConnectTimeoutMs) of
     {ok, Sock} ->
-        ok = inet:setopts(Sock, [binary, {send_timeout, ConnectTimeoutMs}, {send_timeout_close, true}]),
+        ok = inet:setopts(Sock, [binary, {send_timeout, TtgMs}, {send_timeout_close, true}]),
         if (Scheme =:= https) ->
             handle(ssl_connect, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}));
         true ->
             handle(connected, ?update_ttg(Request#elwhc_request{socket = {gen_tcp, Sock}}))
         end;
+    {error, timeout} ->
+        {{error, connect_timeout}, Request};
     Error ->
         {Error, Request}
     end;
@@ -235,6 +237,8 @@ handle(connected, Request) ->
     case SockMod:send(Sock, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]) of
     ok ->
         handle(rx_rsp_line, ?update_ttg(Request));
+    {error, timeout} ->
+        {{error, send_timeout}, Request};
     Error ->
         {Error, Request}
     end;
@@ -409,7 +413,7 @@ handle(rx_body_chunked_entity_headers, #elwhc_request{request_ttg_ms = TtgMs} = 
     end;
 
 handle(_, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs =< 0) ->
-    {{error, request_timeout}, Request}.
+    {{error, timeout}, Request}.
 
 -spec update_ttg(elwhc_request(), erlang:timestamp()) -> elwhc_request().
 update_ttg(#elwhc_request{request_ttg_ms = RequestTTGMs, request_ttg_t0 = T0} = Request, T1) ->

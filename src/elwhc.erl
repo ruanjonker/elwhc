@@ -110,6 +110,9 @@ build_options([{ssl_options,V} | T], Opts) when is_list(V) ->
 build_options([{max_sessions,V} | T], Opts) when is_integer(V) andalso (V > 0) ->
     build_options(T, Opts#elwhc_opts{max_sessions = V});
 
+build_options([{max_requests_per_session,V} | T], Opts) when is_integer(V) andalso (V > 0) ->
+    build_options(T, Opts#elwhc_opts{max_requests_per_session = V});
+
 build_options([], Opts) -> Opts.
  
 
