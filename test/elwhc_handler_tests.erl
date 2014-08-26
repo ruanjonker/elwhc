@@ -53,9 +53,10 @@ basic_server_transfer_chunked_test() ->
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.35:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
 
-    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nTransfer-Encoding:chunked\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
+    ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nTransfer-Encoding:bla,chunked,identity\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
 
-    rot({ok, 200, [{"More-Headers","Header-Value"}, {"Server", "bla"}, {"Transfer-Encoding", "chunked"}], <<"1234567">>}),
+    rot({ok, 200, [{"more-headers", "More-Headers","Header-Value"}, {"server", "Server", "bla"}, {"transfer-encoding", "Transfer-Encoding", "bla,identity"}], <<"1234567">>}),
+
 
     ServerPid ! loop,
 
@@ -69,7 +70,7 @@ basic_server_transfer_chunked_test() ->
 
     ServerPid ! close,
 
-    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+    rot({ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>}),
 
     ServerPid ! die,
 
@@ -96,7 +97,7 @@ basic_server_keepalive_test() ->
 
     ServerPid ! {rsp_payload, <<"HTTP/1.1 200 OK\r\nServer:bla\r\nContent-Length:5\r\nX-Test:bla\r\n\r\nHello">>},
 
-    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+    rot({ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>}),
 
     ServerPid ! loop,
 
@@ -111,7 +112,7 @@ basic_server_keepalive_test() ->
 
     ServerPid ! close,
 
-    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+    rot({ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>}),
 
     ServerPid ! die,
 
@@ -148,7 +149,7 @@ basic_server_max_requests_per_session_reached_test() ->
 
     receive
 
-        {ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>} ->
+        {ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>} ->
 
         rot({'DOWN', HndlrRef, process, Session#elwhc_session.pid, normal})
 
@@ -180,7 +181,7 @@ basic_server_content_length_close_test() ->
 
     ServerPid ! close,
 
-    rot({ok, 200, [{"Server", "bla"}, {"Content-Length", "5"}, {"X-Test", "bla"}], <<"Hello">>}),
+    rot({ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>}),
 
     ServerPid ! die,
 
@@ -207,7 +208,7 @@ basic_server_connection_close_test() ->
 
     ServerPid ! close,
 
-    rot({ok, 200, [{"Server", "bla"}], <<"Hello">>}),
+    rot({ok, 200, [{"server", "Server", "bla"}], <<"Hello">>}),
     
     ServerPid ! die,
 
@@ -329,8 +330,8 @@ rot(Expected) ->
 %    ?debugFmt("~nROTGOT: ~p~n", [Expected]),
         ok;
     Other ->
-        ?debugFmt("~nROT E: ~p~n", [Expected]),
-        ?debugFmt("~nROT T: ~p~n", [Other]),
+        %?debugFmt("~nROT E: ~p~n", [Expected]),
+        %?debugFmt("~nROT T: ~p~n", [Other]),
         throw(Other)
     end.
 

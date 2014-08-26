@@ -17,6 +17,11 @@
 
 -type http_headers() :: list(http_header()).
 
+-type http_rsp_header() :: {string(), string(), string()}.
+
+-type http_rsp_headers() :: list(http_rsp_header()).
+
+
 -type http_option() ::    {connect_timeout_ms,  pos_integer()} 
                         | {request_timeout_ms,  pos_integer()} 
                         | {keepalive_ms,        pos_integer()} 
@@ -30,7 +35,7 @@
 
 -type http_status_code() :: pos_integer(). %TODO: list actual status codes.
 
--type elwhc_request_result() :: {ok, http_status_code(), http_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, max_sessions} | {error, term()}.
+-type elwhc_request_result() :: {ok, http_status_code(), http_rsp_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, max_sessions} | {error, term()}.
 
 
 

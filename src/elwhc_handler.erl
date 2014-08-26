@@ -15,7 +15,7 @@ start_link(Standalone) when is_boolean(Standalone) ->
     F =  fun () -> request_worker_loop(#elwhc_request{standalone = Standalone}) end,
     {ok, spawn_link(F)}.
 
--spec request(pid(), elwhc_request()) -> {ok,  http_status_code(), http_headers(), binary()} | {error, term()}.
+-spec request(pid(), elwhc_request()) -> {ok,  http_status_code(), http_rsp_headers(), binary()} | {error, term()}.
 request(Pid, Request) ->
 
     Ref = make_ref(),
@@ -265,7 +265,9 @@ handle(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs
 
         RspHeaders = Request#elwhc_request.rsp_headers,
 
-        NewRspHeaders = [{maybe_atom_to_list(HttpField), HttpString} | RspHeaders],
+        LHttpField = maybe_atom_to_list(HttpField),
+
+        NewRspHeaders = [{string:to_lower(LHttpField), LHttpField, HttpString} | RspHeaders],
 
         handle(rx_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
 
@@ -286,13 +288,21 @@ handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttp
 
     if ((StatusCode >= 100) andalso (StatusCode < 300)) ->
 
-        case lists:keysearch("Content-Length", 1, RspHeaders) of
-        {value, {_, StringContentLength}} ->
+        case lists:keyfind("content-length", 1, RspHeaders) of
+        {_, _, StringContentLength} ->
             handle(rx_body_content_length, Request#elwhc_request{content_length = list_to_integer(StringContentLength)});
         false ->
-            case lists:keysearch("Transfer-Encoding", 1, RspHeaders) of
-            {value, {_,_}} ->
-                handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined});
+            case lists:keyfind("transfer-encoding", 1, RspHeaders) of
+            {_, TransferEncodingHeader, TransferEncodingValue} ->
+                case re:run(TransferEncodingValue, "chunked", [{capture, none}]) of
+                match ->
+                    NewTransferEncodingValue = re:replace(TransferEncodingValue, "([ ]?,)?chunked", "", [{return, list}]),
+                    NewHeaderTuple = {"transfer-encoding", TransferEncodingHeader, NewTransferEncodingValue},
+                    NewRspHeaders = lists:keyreplace("transfer-encoding", 1, RspHeaders, NewHeaderTuple),
+                    handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined, rsp_headers = NewRspHeaders});
+                nomatch ->
+                    handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
+                end;
             false ->
                 handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
             end
@@ -400,7 +410,10 @@ handle(rx_body_chunked_entity_headers, #elwhc_request{request_ttg_ms = TtgMs} = 
     {ok, {http_header, _, HttpField, _, HttpString}} ->
 
         RspHeaders = Request#elwhc_request.rsp_headers,
-        NewRspHeaders = [{maybe_atom_to_list(HttpField), HttpString} | RspHeaders],
+
+        LHeaderField = maybe_atom_to_list(HttpField),
+
+        NewRspHeaders = [{string:to_lower(LHeaderField), LHeaderField, HttpString} | RspHeaders],
 
         handle(rx_body_chunked_entity_headers, ?update_ttg(Request#elwhc_request{rsp_headers = NewRspHeaders}));
 
