@@ -16,7 +16,7 @@
 -record(parsed_url, {scheme, host, port, raw_host, user_info, path_query_frag}).
 -type parsed_url() :: #parsed_url{}.
 
--record(elwhc_opts, {connect_timeout_ms = 120000, request_timeout_ms = 300000, keepalive_ms = 30000, keepalive = false, tcp_connect_options = [binary, {packet, http}, {active, false}, {reuseaddr, true}, {nodelay, true}, {keepalive, true}], ssl_options = [], max_sessions = 5, max_requests_per_session = 1000}).
+-record(elwhc_opts, {connect_timeout_ms = 120000, request_timeout_ms = 300000, keepalive_ms = 30000, keepalive = false, tcp_connect_options = [binary, {packet, http}, {active, false}, {reuseaddr, true}, {nodelay, true}, {keepalive, true}], ssl_options = [], max_sessions = 5, max_requests_per_session = 1000, stream_from = undefined}).
 -type elwhc_opts() :: #elwhc_opts{}.
 
 -record(elwhc_request, {

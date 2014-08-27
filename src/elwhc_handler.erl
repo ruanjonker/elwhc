@@ -226,21 +226,52 @@ handle(connected, Request) ->
     UserHeaders = Request#elwhc_request.headers,
     KeepAlive = Opts#elwhc_opts.keepalive,
 
-    SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
+    SendBody = ((Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT')),
 
-    ContentLength = if SendBody -> size(Body) ; true -> 0 end,
+    {NextState, TxPayload} =
+    if SendBody andalso is_function(Opts#elwhc_opts.stream_from, 0) ->
+        Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, undefined, UserHeaders), []),
+        {stream_from_fun, [ReqLine, Headers, "\r\n"]};
+    true ->
+        ContentLength = if SendBody -> size(Body) ; true -> 0 end,
+        Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders), []),
+        {rx_rsp_line, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]}
+    end,
 
-    Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders), []),
-
-    SendBody = (Request#elwhc_request.method =:= 'POST') orelse (Request#elwhc_request.method =:= 'PUT'), 
-
-    case SockMod:send(Sock, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]) of
+    case SockMod:send(Sock, TxPayload) of
     ok ->
-        handle(rx_rsp_line, ?update_ttg(Request));
+        handle(NextState, ?update_ttg(Request));
     {error, timeout} ->
         {{error, send_timeout}, Request};
     Error ->
         {Error, Request}
+    end;
+
+handle(stream_from_fun, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+
+    {SockMod, Sock} = Request#elwhc_request.socket,
+
+    Opts = Request#elwhc_request.options,
+
+    Fun = Opts#elwhc_opts.stream_from,
+
+    case Fun() of
+    Binary when is_binary(Binary) ->
+
+        BinSize = size(Binary),
+
+        HexSize = integer_to_list(BinSize, 16),
+
+        case SockMod:send(Sock, [HexSize, <<"\r\n">>, Binary, <<"\r\n">>]) of
+        ok ->
+            NextState = if (BinSize > 0) -> stream_from_fun; true -> rx_rsp_line end,
+            handle(NextState, ?update_ttg(Request));
+        {error, timeout} ->
+            {{error, send_timeout}, Request};
+        Error ->
+            {Error, Request}
+        end
+
     end;
 
 handle(rx_rsp_line, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
