@@ -24,6 +24,11 @@ select_test() ->
     ?assertMatch([[#elwhc_session{scheme = http, host = "www.somehost.com", port = 12345, pid = Pid, status = in_use}]], elwhc_sessions:list()),
 
     elwhc_test_helper:kill(Pid, kill),
+    
+    %This is just to make sure that the sessions proc has processed it's messageq
+    ?assert(Pid =/= self()), 
+    ?assertEqual(ok, elwhc_sessions:free(self())),
+
 
     ?assertEqual([], elwhc_sessions:list()),
 
