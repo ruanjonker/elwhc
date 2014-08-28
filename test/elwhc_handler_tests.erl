@@ -37,6 +37,51 @@ merge_headers_test() ->
 
     ok.
 
+basic_server_stream_from_file_test() ->
+
+    TestPid = self(),
+
+    {ServerPid, Ref} = spawn_monitor(fun() -> basic_server(TestPid, {127,0,1,34}, 12345) end),
+
+    rot(listening),
+
+%%%%%%%%First request
+
+    ?assertEqual(ok, file:write_file("basic_server_stream_from_file_test.txt", <<"1234567890abcdef">>, [raw,write,binary])),
+
+    spawn(fun() -> Res = elwhc:request('POST', "http://127.0.1.34:12345/pa/th?a=b#12345", <<>>, [], [{stream_from, "basic_server_stream_from_file_test.txt"}]), TestPid ! Res end),
+
+    rot(accepted),
+
+    ServerPid ! loop,
+
+    rot({payload, 
+        {ok, <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nTransfer-Encoding:chunked\r\nHost:127.0.1.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n">>}}),
+
+    ServerPid ! loop,
+
+    rot({payload, 
+        {ok, <<"10\r\n1234567890abcdef\r\n">>}}),
+
+    ServerPid ! loop,
+
+    rot({payload, 
+        {ok, <<"0\r\n\r\n">>}}),
+
+ 
+    ServerPid ! {rsp_payload, <<"HTTP/1.0 200 OK\r\nServer:bla\r\nTransfer-Encoding:bla,chunked,identity\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
+
+    rot({ok, 200, [{"more-headers", "More-Headers","Header-Value"}, {"server", "Server", "bla"}, {"transfer-encoding", "Transfer-Encoding", "bla,identity"}], <<"1234567">>}),
+
+    ServerPid ! close,
+
+    ServerPid ! die,
+
+    rot({'DOWN', Ref, process, ServerPid, normal}),
+
+    ok.
+
+
 basic_server_stream_from_fun_test() ->
 
     TestPid = self(),
@@ -62,7 +107,7 @@ basic_server_stream_from_fun_test() ->
     ServerPid ! loop,
 
     rot({payload, 
-        {ok, <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n1\r\n0\r\n1\r\n1\r\n1\r\n2\r\n1\r\n3\r\n1\r\n4\r\n0\r\n\r\n">>}}),
+        {ok, <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nTransfer-Encoding:chunked\r\nHost:127.0.0.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n1\r\n0\r\n1\r\n1\r\n1\r\n2\r\n1\r\n3\r\n1\r\n4\r\n0\r\n\r\n">>}}),
 
     ServerPid ! {rsp_payload, <<"HTTP/1.0 200 OK\r\nServer:bla\r\nTransfer-Encoding:bla,chunked,identity\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
 

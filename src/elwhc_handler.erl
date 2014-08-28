@@ -230,12 +230,18 @@ handle(connected, Request) ->
 
     {NextState, TxPayload} =
     if SendBody andalso is_function(Opts#elwhc_opts.stream_from, 0) ->
-        Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, undefined, UserHeaders), []),
+        Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, undefined, UserHeaders ++ [{"Transfer-Encoding", "chunked"}]), []),
         {stream_from_fun, [ReqLine, Headers, "\r\n"]};
+
+    SendBody andalso is_list(Opts#elwhc_opts.stream_from) ->
+        Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, undefined, UserHeaders ++ [{"Transfer-Encoding", "chunked"}]), []),
+        {stream_from_file_start, [ReqLine, Headers, "\r\n"]};
+
     true ->
         ContentLength = if SendBody -> size(Body) ; true -> 0 end,
         Headers = build_headers(merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders), []),
         {rx_rsp_line, [ReqLine, Headers, "\r\n", if (SendBody) -> Body; true -> <<>> end]}
+
     end,
 
     case SockMod:send(Sock, TxPayload) of
@@ -246,6 +252,50 @@ handle(connected, Request) ->
     Error ->
         {Error, Request}
     end;
+
+handle(stream_from_file_start, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
+
+    Opts = Request#elwhc_request.options,
+
+    Filename = Opts#elwhc_opts.stream_from,
+    Ref = make_ref(),
+
+    ChunkSizeBytes = 65536,
+
+    FileServerFun = fun() ->
+        {ok, Fd} = file:open(Filename, [raw,binary,{read_ahead, ChunkSizeBytes}]),
+        ok = stream_from_file(true, Fd, Ref),
+        ok = file:close(Fd)
+    end,
+
+    {FileServerPid, MonRef} = spawn_monitor(FileServerFun),
+
+    StreamFun = fun() ->
+
+        FileServerPid ! {read, Ref, self(), ChunkSizeBytes},
+
+        receive 
+        {ok, Ref, Data} ->
+            Data;
+
+        {eof, Ref} ->
+            receive {'DOWN', MonRef, process, FileServerPid, normal} -> ok end,
+            demonitor(MonRef, [flush]),
+            <<>>;
+
+        {'DOWN', MonRef, process, FileServerPid, Reason} ->
+            demonitor(MonRef, [flush]),
+            throw(Reason)
+
+        end
+       
+    end,
+
+    Opts0 = Opts#elwhc_opts{stream_from = StreamFun},
+
+    Request0 = Request#elwhc_request{options = Opts0},
+
+    handle(stream_from_fun, ?update_ttg(Request0));
 
 handle(stream_from_fun, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs > 0) ->
 
@@ -521,5 +571,21 @@ merge_headers(HostHeaderValue, KeepAlive, ContentLength, UserHeaders) ->
     end,
 
     [{H, V} || {_, H,V} <- H4].
+
+-spec stream_from_file(boolean(), file:io_device(), reference()) -> ok.
+stream_from_file(true, Fd, Ref) ->
+    receive {read, Ref, Pid, ChunkSizeBytes} -> ok end,
+    Continue = 
+    case file:read(Fd, ChunkSizeBytes) of
+    {ok, Data} ->
+        Pid ! {ok, Ref, Data},
+        true;
+    eof ->
+        Pid ! {eof, Ref},
+        false
+    end,
+    stream_from_file(Continue, Fd, Ref);
+stream_from_file(false, _, _) -> ok.
+
 
 %EOF
