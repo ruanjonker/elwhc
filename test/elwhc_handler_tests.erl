@@ -53,21 +53,20 @@ basic_server_stream_from_file_test() ->
 
     rot(accepted),
 
-    ServerPid ! loop,
+    E0 = <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nTransfer-Encoding:chunked\r\nHost:127.0.1.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n">>,
+    ServerPid ! {loop, size(E0)},
 
-    rot({payload, 
-        {ok, <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nTransfer-Encoding:chunked\r\nHost:127.0.1.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n">>}}),
+    rot({payload, {ok, E0}}),
 
-    ServerPid ! loop,
+    E1 = <<"10\r\n1234567890abcdef\r\n">>,
+    ServerPid ! {loop, size(E1)},
 
-    rot({payload, 
-        {ok, <<"10\r\n1234567890abcdef\r\n">>}}),
+    rot({payload,  {ok, E1}}),
 
-    ServerPid ! loop,
+    E2 = <<"0\r\n\r\n">>,
+    ServerPid ! {loop, size(E2)},
 
-    rot({payload, 
-        {ok, <<"0\r\n\r\n">>}}),
-
+    rot({payload, {ok, E2}}),
  
     ServerPid ! {rsp_payload, <<"HTTP/1.0 200 OK\r\nServer:bla\r\nTransfer-Encoding:bla,chunked,identity\r\n\r\n2;ext=ext-value\r\n12\r\n5\r\n34567\r\n0\r\nMore-Headers:Header-Value\r\n\r\n">>},
 
@@ -104,7 +103,7 @@ basic_server_stream_from_fun_test() ->
     rot(accepted),
     %Cheating a bit here - waiting for all tcp packets to be sent , then do receive,,,,
     rot ({'DOWN', SRef, process, StreamPid, normal}),
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"POST /pa/th?a=b#12345 HTTP/1.0\r\nTransfer-Encoding:chunked\r\nHost:127.0.0.34:12345\r\nUser-Agent:ELWHC/1.0\r\n\r\n1\r\n0\r\n1\r\n1\r\n1\r\n2\r\n1\r\n3\r\n1\r\n4\r\n0\r\n\r\n">>}}),
@@ -134,7 +133,7 @@ basic_server_transfer_chunked_test() ->
 
     rot(accepted),
 
-    ServerPid ! loop,    
+    ServerPid ! {loop, 0},    
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.35:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
@@ -144,7 +143,7 @@ basic_server_transfer_chunked_test() ->
     rot({ok, 200, [{"more-headers", "More-Headers","Header-Value"}, {"server", "Server", "bla"}, {"transfer-encoding", "Transfer-Encoding", "bla,identity"}], <<"1234567">>}),
 
 
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
 %%%%%%%%% Second request
     spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.35:12345/pa/th?a=b2#12345", <<>>, [], [{keepalive, true}]), TestPid ! Res end),
@@ -178,7 +177,7 @@ basic_server_keepalive_test() ->
 
     rot(accepted),
 
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.36:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
@@ -187,7 +186,7 @@ basic_server_keepalive_test() ->
 
     rot({ok, 200, [{"server", "Server", "bla"}, {"content-length", "Content-Length", "5"}, {"x-test", "X-Test", "bla"}], <<"Hello">>}),
 
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
 
 %%%%%%%%% Second request
@@ -223,7 +222,7 @@ basic_server_max_requests_per_session_reached_test() ->
     spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.39:12345/pa/th?a=b#12345", <<>>, [], [{keepalive, true}, {max_requests_per_session, 1}]), TestPid ! Res end),
 
     rot(accepted),
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.1\r\nHost:127.0.0.39:12345\r\nConnection:keep-alive\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
@@ -262,7 +261,7 @@ basic_server_content_length_close_test() ->
     spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.37:12345/pa/th?a=b#12345", <<>>, [{"User-Agent", "MyApp"}], []), TestPid ! Res end),
 
     rot(accepted),
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nUser-Agent:MyApp\r\nHost:127.0.0.37:12345\r\nContent-Length:0\r\n\r\n">>}}),
@@ -290,7 +289,7 @@ basic_server_connection_close_test() ->
     spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.38:12345/pa/th?a=b#12345", <<>>, [], []), TestPid ! Res end),
 
     rot(accepted),
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.38:12345\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
@@ -318,7 +317,7 @@ receive_timeout_test() ->
     spawn(fun() -> Res = elwhc:request('GET', "http://127.0.0.38:12345/pa/th?a=b#12345", <<>>, [], [{request_timeout_ms, 100}]), TestPid ! Res end),
 
     rot(accepted),
-    ServerPid ! loop,
+    ServerPid ! {loop, 0},
 
     rot({payload, 
         {ok, <<"GET /pa/th?a=b#12345 HTTP/1.0\r\nHost:127.0.0.38:12345\r\nUser-Agent:ELWHC/1.0\r\nContent-Length:0\r\n\r\n">>}}),
@@ -387,14 +386,14 @@ basic_server(TestPid, If, Port) ->
 
     TestPid ! accepted,
 
-    receive loop -> ok end,
+    receive {loop, RxSize} -> ok end,
 
-    basic_server_rx_loop(TestPid, LS, AS).
+    basic_server_rx_loop(TestPid, LS, AS, RxSize).
     
 
-basic_server_rx_loop(TestPid, LS, AS) ->
+basic_server_rx_loop(TestPid, LS, AS, RxSize) ->
 
-    RxRes = gen_tcp:recv(AS, 0),
+    RxRes = gen_tcp:recv(AS, RxSize),
 
     TestPid ! {payload, RxRes},
 
@@ -409,14 +408,14 @@ basic_server_rx_loop(TestPid, LS, AS) ->
 
             receive die -> ok end;
 
-        loop ->
+        {loop, NewRxSize} ->
 
-            basic_server_rx_loop(TestPid, LS, AS)
+            basic_server_rx_loop(TestPid, LS, AS, NewRxSize)
 
         end;
 
-    loop -> 
-        basic_server_rx_loop(TestPid, LS, AS)
+    {loop, NewRxSize} -> 
+        basic_server_rx_loop(TestPid, LS, AS, NewRxSize)
 
     end.
 
