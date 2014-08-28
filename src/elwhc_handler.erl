@@ -313,34 +313,26 @@ handle(rx_headers, #elwhc_request{request_ttg_ms = TtgMs} = Request) when (TtgMs
         {Err, Request}
     end;
 
-handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_status = RspHttpPacket, rsp_headers = RspHeaders} = Request) when (TtgMs > 0) ->
+handle(plan_rx_body, #elwhc_request{request_ttg_ms = TtgMs, rsp_headers = RspHeaders} = Request) when (TtgMs > 0) ->
 
-    {http_response, _, StatusCode, _} = RspHttpPacket,
-
-    if ((StatusCode >= 100) andalso (StatusCode < 300)) ->
-
-        case lists:keyfind("content-length", 1, RspHeaders) of
-        {_, _, StringContentLength} ->
-            handle(rx_body_content_length, Request#elwhc_request{content_length = list_to_integer(StringContentLength)});
-        false ->
-            case lists:keyfind("transfer-encoding", 1, RspHeaders) of
-            {_, TransferEncodingHeader, TransferEncodingValue} ->
-                case re:run(TransferEncodingValue, "chunked", [{capture, none}]) of
-                match ->
-                    NewTransferEncodingValue = re:replace(TransferEncodingValue, "([ ]?,)?chunked", "", [{return, list}]),
-                    NewHeaderTuple = {"transfer-encoding", TransferEncodingHeader, NewTransferEncodingValue},
-                    NewRspHeaders = lists:keyreplace("transfer-encoding", 1, RspHeaders, NewHeaderTuple),
-                    handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined, rsp_headers = NewRspHeaders});
-                nomatch ->
-                    handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
-                end;
-            false ->
+    case lists:keyfind("content-length", 1, RspHeaders) of
+    {_, _, StringContentLength} ->
+        handle(rx_body_content_length, Request#elwhc_request{content_length = list_to_integer(StringContentLength)});
+    false ->
+        case lists:keyfind("transfer-encoding", 1, RspHeaders) of
+        {_, TransferEncodingHeader, TransferEncodingValue} ->
+            case re:run(TransferEncodingValue, "chunked", [{capture, none}]) of
+            match ->
+                NewTransferEncodingValue = re:replace(TransferEncodingValue, "([ ]?,)?chunked", "", [{return, list}]),
+                NewHeaderTuple = {"transfer-encoding", TransferEncodingHeader, NewTransferEncodingValue},
+                NewRspHeaders = lists:keyreplace("transfer-encoding", 1, RspHeaders, NewHeaderTuple),
+                handle(rx_body_chunked_length, Request#elwhc_request{content_length = undefined, rsp_headers = NewRspHeaders});
+            nomatch ->
                 handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
-            end
-        end;
-
-    true ->
-        {ok, Request#elwhc_request{content_length = 0}}
+            end;
+        false ->
+            handle(rx_body_until_connection_close, Request#elwhc_request{content_length = undefined})
+        end
     end;
 
 handle(rx_body_content_length, #elwhc_request{request_ttg_ms = TtgMs, rsp_body = RspBodySoFar, content_length = ContentLength} = Request) when (TtgMs > 0) andalso
