@@ -19,6 +19,8 @@ default_port_test() ->
 
 build_options_test() ->
 
+    StreamFun = fun() -> <<>> end,
+
     Opts = [
           {connect_timeout_ms,1}
         , {request_timeout_ms,2}
@@ -28,6 +30,7 @@ build_options_test() ->
         , {ssl_options, [ssl]}
         , {max_sessions,4}
         , {max_requests_per_session,5}
+        , {stream_from, StreamFun}
     ],
 
     Expected = #elwhc_opts {
@@ -39,6 +42,7 @@ build_options_test() ->
         , ssl_options = [ssl]
         , max_sessions = 4
         , max_requests_per_session = 5
+        , stream_from = StreamFun
     },
 
     ?assertEqual(Expected, elwhc:build_options(Opts, #elwhc_opts{})),

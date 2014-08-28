@@ -17,12 +17,18 @@
 
 -type http_headers() :: list(http_header()).
 
+-type http_rsp_header() :: {string(), string(), string()}.
+
+-type http_rsp_headers() :: list(http_rsp_header()).
+
+
 -type http_option() ::    {connect_timeout_ms,  pos_integer()} 
                         | {request_timeout_ms,  pos_integer()} 
                         | {keepalive_ms,        pos_integer()} 
                         | {keepalive,           boolean()} 
                         | {max_sessions,        pos_integer()} 
                         | {max_requests_per_session,        pos_integer()} 
+                        | {stream_from,         elwhc_stream_from_fun() | undefined} 
                         | {tcp_connect_options, list(term())} 
                         | {ssl_options,         list(term())}.
 
@@ -30,8 +36,8 @@
 
 -type http_status_code() :: pos_integer(). %TODO: list actual status codes.
 
--type elwhc_request_result() :: {ok, http_status_code(), http_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, max_sessions} | {error, term()}.
+-type elwhc_request_result() :: {ok, http_status_code(), http_rsp_headers(), binary()} | {error, invalid_scheme} | {error, malformed_url} | {error, max_sessions} | {error, term()}.
 
-
+-type elwhc_stream_from_fun() :: fun (() -> binary()). %end of the stream is indicated by <<>> i.e. a zero-lengthed binary
 
 %EOF
