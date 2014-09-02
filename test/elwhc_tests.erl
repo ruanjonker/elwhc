@@ -31,6 +31,7 @@ build_options_test() ->
         , {max_sessions,4}
         , {max_requests_per_session,5}
         , {stream_from, StreamFun}
+        , {stream_from_file_chunk_size_bytes, 4096}
     ],
 
     Expected = #elwhc_opts {
@@ -43,6 +44,7 @@ build_options_test() ->
         , max_sessions = 4
         , max_requests_per_session = 5
         , stream_from = StreamFun
+        , stream_from_file_chunk_size_bytes = 4096
     },
 
     ?assertEqual(Expected, elwhc:build_options(Opts, #elwhc_opts{})),

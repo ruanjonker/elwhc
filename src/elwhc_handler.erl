@@ -258,9 +258,9 @@ handle(stream_from_file_start, #elwhc_request{request_ttg_ms = TtgMs} = Request)
     Opts = Request#elwhc_request.options,
 
     Filename = Opts#elwhc_opts.stream_from,
-    Ref = make_ref(),
+    ChunkSizeBytes = Opts#elwhc_opts.stream_from_file_chunk_size_bytes,
 
-    ChunkSizeBytes = 65536,
+    Ref = make_ref(),
 
     FileServerFun = fun() ->
         {ok, Fd} = file:open(Filename, [raw,binary,{read_ahead, ChunkSizeBytes}]),

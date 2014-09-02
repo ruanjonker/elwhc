@@ -29,6 +29,7 @@
                         | {max_sessions,        pos_integer()} 
                         | {max_requests_per_session,        pos_integer()} 
                         | {stream_from,         elwhc_stream_from_fun() | undefined} 
+                        | {stream_from_file_chunk_size_bytes,   pos_integer()} 
                         | {tcp_connect_options, list(term())} 
                         | {ssl_options,         list(term())}.
 

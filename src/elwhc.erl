@@ -116,6 +116,9 @@ build_options([{max_requests_per_session,V} | T], Opts) when is_integer(V) andal
 build_options([{stream_from,V} | T], Opts) when is_function(V, 0) orelse is_list(V) ->
     build_options(T, Opts#elwhc_opts{stream_from = V});
 
+build_options([{stream_from_file_chunk_size_bytes,V} | T], Opts) when is_integer(V) andalso (V > 0) ->
+    build_options(T, Opts#elwhc_opts{stream_from_file_chunk_size_bytes = V});
+
 build_options([], Opts) -> Opts.
  
 
