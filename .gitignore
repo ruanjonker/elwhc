@@ -2,3 +2,4 @@
 /deps
 /.eunit
 /Session.vim
+/.plt
